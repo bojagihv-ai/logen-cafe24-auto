@@ -1,0 +1,14 @@
+# 민감 정보 / 자동 생성 파일
+lc_config.json
+*.ico
+.playwright_logen/
+__pycache__/
+*.pyc
+*.pyo
+server_log.txt
+server_err.txt
+
+# 기타
+.env
+*.db
+node_modules/

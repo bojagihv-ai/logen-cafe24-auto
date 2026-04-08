@@ -9,11 +9,11 @@ for /f "tokens=5" %%a in ('netstat -ano 2^>nul ^| findstr ":8080 " ^| findstr "L
 )
 timeout /t 2 /nobreak > nul
 
-:: 2. PowerShell로 Python 런처 시작
-powershell -ExecutionPolicy Bypass -File "C:\Users\kua\Desktop\projects\kuaai\kuaai-main\start_server.ps1"
+:: 2. 새 CMD 창으로 서버 실행 (창이 닫히면 서버도 종료됨)
+start "Logen-Cafe24 Server" /min "C:\Users\kua\AppData\Local\Programs\Python\Python311\python.exe" -X utf8 "C:\Users\kua\Desktop\projects\kuaai\kuaai-main\server_launcher.py"
 
 :: 3. 서버 뜰 때까지 대기
-timeout /t 7 /nobreak > nul
+timeout /t 6 /nobreak > nul
 
 :: 4. 브라우저 열기
 start "" "http://localhost:8080/"

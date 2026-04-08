@@ -1,14 +1,72 @@
-# 민감 정보 / 자동 생성 파일
+# ============================================================
+# 민감 정보 (절대 커밋 금지)
+# ============================================================
 lc_config.json
-*.ico
+.env
+.env.*
+
+# Playwright 세션 (로그인 쿠키/세션 포함)
 .playwright_logen/
+.playwright_cafe24/
+
+# ============================================================
+# 로그 / 임시 출력 파일
+# ============================================================
+*.log
+server_out.txt
+server_stderr.txt
+server_stdout.txt
+server_start.log
+py_stderr.txt
+py_stdout.txt
+err.txt
+out.txt
+shortcut_info.txt
+shortcut_ok.txt
+firebase-debug.log
+
+# ============================================================
+# 테스트 / 진단 스크립트 (작업용, 배포 불필요)
+# ============================================================
+test_*.ps1
+test_*.bat
+test_*.vbs
+check_*.ps1
+diag*.ps1
+diag*.py
+run_capture.ps1
+run_debug.ps1
+run_and_capture.ps1
+run_bat_free.ps1
+run_and_capture.ps1
+kill_*.ps1
+full_restart.ps1
+restart_check.ps1
+start_watchdog.ps1
+
+# ============================================================
+# Python 캐시
+# ============================================================
 __pycache__/
 *.pyc
 *.pyo
-server_log.txt
-server_err.txt
 
-# 기타
-.env
+# ============================================================
+# 관계없는 프로젝트 / 빌드 산출물
+# ============================================================
+*.ico
 *.db
 node_modules/
+crypto_venv/
+crypto_bot/
+crypto_bot_requirements.txt
+frontend/
+backend/
+functions/
+
+# ============================================================
+# IDE / 에디터
+# ============================================================
+.vscode/
+.idx/
+.github/

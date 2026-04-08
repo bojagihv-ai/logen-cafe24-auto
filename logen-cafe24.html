@@ -24,6 +24,7 @@
       <button class="tab-btn" data-tab="invoice">송장 발급</button>
       <button class="tab-btn" data-tab="upload">송장 등록</button>
       <button class="tab-btn" data-tab="tracking">배송 조회</button>
+      <button class="tab-btn" data-tab="autoprint">자동인쇄</button>
     </nav>
 
     <!-- ===== TAB 1: 설정 ===== -->
@@ -86,6 +87,14 @@
           <div class="input-group">
             <label for="logen-sender-zipcode">보내는 사람 우편번호</label>
             <input type="text" id="logen-sender-zipcode" placeholder="12345">
+          </div>
+          <div class="input-group">
+            <label for="logen-user-id">로젠 로그인 ID (자동로그인용)</label>
+            <input type="text" id="logen-user-id" placeholder="로젠 사용자 ID (예: 33253401)">
+          </div>
+          <div class="input-group">
+            <label for="logen-password">로젠 비밀번호 (자동로그인용)</label>
+            <input type="password" id="logen-password" placeholder="비밀번호 입력 시 자동 로그인">
           </div>
           <button class="primary-btn" id="save-logen-btn">로젠 설정 저장</button>
         </div>
@@ -161,6 +170,8 @@
           <span class="badge" id="invoice-count-badge">0건</span>
         </div>
         <div class="toolbar-right">
+          <button class="secondary-btn" id="load-orders-invoice-btn">📥 송장 불러오기</button>
+          <button class="secondary-btn" id="load-logen-printed-btn" style="background:#1a6b3c;color:#fff;border-color:#1a6b3c;">🚚 로젠 출력완료 불러오기</button>
           <button class="secondary-btn" id="download-logen-excel">로젠 EDI 엑셀 다운로드</button>
           <button class="primary-btn" id="generate-invoices-btn">송장번호 자동생성 (테스트)</button>
           <button class="primary-btn" id="auto-register-logen-btn" style="background:#e67e22;font-size:15px;padding:10px 22px;">&#128640; 로젠 자동 등록</button>
@@ -206,8 +217,25 @@
       <div class="toolbar">
         <div class="toolbar-left">
           <h2>카페24 송장번호 일괄 등록</h2>
+          <span class="badge" id="upload-count-badge">0건</span>
+        </div>
+        <div class="toolbar-right" style="flex-wrap:wrap;gap:6px;">
+          <div class="input-group inline" style="align-items:center;gap:4px;">
+            <label style="white-space:nowrap;font-weight:600;">📅 기간</label>
+            <input type="date" id="upload-date-from" style="font-size:13px;">
+            <span>~</span>
+            <input type="date" id="upload-date-to" style="font-size:13px;">
+          </div>
+          <div style="display:flex;gap:4px;">
+            <button class="secondary-btn" id="preset-today-btn" style="font-size:12px;padding:4px 10px;">오늘</button>
+            <button class="secondary-btn" id="preset-yesterday-btn" style="font-size:12px;padding:4px 10px;">어제</button>
+            <button class="secondary-btn" id="preset-week-btn" style="font-size:12px;padding:4px 10px;">7일</button>
+          </div>
+          <button class="primary-btn" id="load-logen-printed-upload-btn" style="background:#1a6b3c;font-size:14px;">🚚 로젠 출력완료 불러오기</button>
         </div>
       </div>
+
+      <div id="logen-printed-status" style="display:none;background:#f0f8ff;border:1px solid #3498db;border-radius:6px;padding:10px 14px;margin:10px 0;font-size:13px;line-height:1.7;max-height:140px;overflow-y:auto;"></div>
 
       <div class="upload-section">
         <div class="upload-card">
@@ -306,6 +334,99 @@
         </div>
       </div>
     </section>
+
+    <!-- ===== TAB 6: 자동인쇄 ===== -->
+    <section class="tab-content" id="tab-autoprint">
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <h2>주문서 자동인쇄</h2>
+          <span class="badge" id="autoprint-status-badge">OFF</span>
+        </div>
+      </div>
+
+      <div class="settings-grid">
+        <div class="settings-card">
+          <h2>자동인쇄 설정</h2>
+          <div class="input-group">
+            <label for="autoprint-time">인쇄 시각 (매일)</label>
+            <input type="time" id="autoprint-time" value="15:00">
+            <small>설정된 시각에 배송준비중 주문서를 자동 인쇄합니다</small>
+          </div>
+          <div class="input-group" style="margin-top:1.2rem;">
+            <label>자동인쇄 ON / OFF</label>
+            <div class="toggle-container">
+              <label class="toggle-switch">
+                <input type="checkbox" id="autoprint-enabled">
+                <span class="toggle-slider"></span>
+              </label>
+              <span id="autoprint-toggle-label" style="margin-left:0.8rem;font-weight:600;color:var(--text-secondary);">OFF</span>
+            </div>
+          </div>
+          <button class="primary-btn" id="save-autoprint-btn" style="margin-top:1.2rem;">설정 저장</button>
+          <button class="secondary-btn" id="test-autoprint-btn" style="margin-top:0.5rem;width:100%;">지금 테스트 인쇄</button>
+        </div>
+
+        <div class="settings-card">
+          <h2>인쇄 로그</h2>
+          <div id="autoprint-log" style="max-height:300px;overflow-y:auto;font-size:0.85rem;color:var(--text-secondary);">
+            <p>아직 인쇄 기록이 없습니다.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="info-box">
+        <strong>사용 방법:</strong>
+        <ol>
+          <li>인쇄 시각을 설정하세요 (기본: 오후 3시)</li>
+          <li>자동인쇄를 ON으로 켜세요</li>
+          <li>'설정 저장'을 누르면 매일 해당 시각에 배송준비중(N20) 주문을 조회하여 주문서(간단인쇄)를 자동 출력합니다</li>
+          <li>브라우저 탭이 열려있어야 작동합니다 (백그라운드 탭 OK)</li>
+        </ol>
+      </div>
+
+      <div class="info-box" id="autoprint-next-run" style="display:none;">
+        <strong>다음 인쇄 예정:</strong> <span id="autoprint-next-time">-</span>
+      </div>
+    </section>
+
+    <!-- 자동인쇄 전용 프레임 (화면엔 안 보이고 인쇄 시에만 표시됨) -->
+    <div id="autoprint-frame"></div>
+
+    <!-- 이름 매칭 모달 -->
+    <div class="modal-overlay" id="name-match-modal" style="display:none;">
+      <div class="modal" style="max-width:820px;width:96%;">
+        <div class="modal-header">
+          <h3>🔍 이름 매칭 확인</h3>
+          <button class="close-btn" id="name-match-close-btn">&times;</button>
+        </div>
+        <div class="modal-body" style="padding:14px 18px;">
+          <p style="margin:0 0 12px;color:#555;font-size:13px;line-height:1.6;">
+            주문번호 없이 등록된 로젠 송장을 <b>수령인 이름</b>으로 카페24 주문과 매칭합니다.<br>
+            매칭할 항목에 체크하고 <b>매칭 적용</b>을 누르면 카페24 송장 등록이 가능해집니다.
+          </p>
+          <div style="max-height:420px;overflow-y:auto;">
+            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+              <thead>
+                <tr style="background:#f0f4ff;text-align:left;position:sticky;top:0;z-index:1;">
+                  <th style="padding:8px 6px;white-space:nowrap;">선택</th>
+                  <th style="padding:8px 6px;white-space:nowrap;">로젠 수령인</th>
+                  <th style="padding:8px 6px;white-space:nowrap;">운송장번호</th>
+                  <th style="padding:8px 6px;"></th>
+                  <th style="padding:8px 6px;white-space:nowrap;">카페24 주문번호</th>
+                  <th style="padding:8px 6px;white-space:nowrap;">카페24 수령인</th>
+                  <th style="padding:8px 6px;white-space:nowrap;">상품명</th>
+                </tr>
+              </thead>
+              <tbody id="name-match-tbody"></tbody>
+            </table>
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
+            <button class="secondary-btn" id="name-match-cancel-btn">취소</button>
+            <button class="primary-btn" id="name-match-apply-btn">✅ 매칭 적용</button>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <!-- Toast Notification -->
     <div class="toast-container" id="toast-container"></div>

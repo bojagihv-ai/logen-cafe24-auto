@@ -249,6 +249,121 @@ def api_logen_register(body):
     fail = sum(1 for r in results if not r['success'])
     return 200, {'results': results, 'total': len(results), 'ok': ok, 'fail': fail}
 
+
+def api_logen_get_printed(body):
+    """로젠에서 slipNo가 있는 (출력완료) 예약 목록 조회 — 날짜 범위 순회"""
+    if not _logen_session.get('token'):
+        return 401, {'error': '로젠 토큰 없음. 로젠 자동 등록을 한 번 먼저 눌러주세요.'}
+
+    token    = _logen_session['token']
+    page_id  = _logen_session.get('page_id', 'lrm01f0050')
+    cust_cd  = body.get('customerCode', '33253401')
+    pick_sales_cd = body.get('pickSalesCd', '33212059')
+    pick_bran_cd  = body.get('pickBranCd',  '332')
+
+    today_str = datetime.date.today().strftime('%Y-%m-%d')
+    start_str = body.get('startDate', today_str)
+    end_str   = body.get('endDate',   today_str)
+
+    BASE = 'https://logis.ilogen.com/api/lrm01b-reserve'
+
+    try:
+        start_d = datetime.datetime.strptime(start_str, '%Y-%m-%d').date()
+        end_d   = datetime.datetime.strptime(end_str,   '%Y-%m-%d').date()
+    except ValueError:
+        return 400, {'error': f'날짜 형식 오류: {start_str} ~ {end_str}'}
+
+    all_items = []
+    d = start_d
+    while d <= end_d:
+        date_str = d.strftime('%Y-%m-%d')
+        try:
+            resp = logen_post(f'{BASE}/lrm01b0050/getResvList', {
+                'strTakeDt':      date_str,
+                'strFixCustCd':   cust_cd,
+                'strPickSalesCd': pick_sales_cd,
+                'strPickBranCd':  pick_bran_cd,
+            }, token, page_id)
+            if isinstance(resp, list):
+                for r in resp:
+                    slip = str(r.get('slipNo', '') or '').strip()
+                    if slip:  # slipNo 있는 항목 = 운송장 발급 완료
+                        all_items.append({
+                            'orderId':      str(r.get('fixTakeNo', '') or '').strip(),
+                            'slipNo':       slip,
+                            'receiverName': r.get('rcvCustNm', ''),
+                            'date':         date_str,
+                            'prtCnt':       r.get('prtCnt', 0),
+                            'seq':          r.get('seq', ''),
+                        })
+        except Exception as e:
+            print(f'  [logen-printed] {date_str} 오류: {e}')
+        d += datetime.timedelta(days=1)
+
+    print(f'  [logen-printed] {start_str}~{end_str} 조회 → {len(all_items)}건')
+    return 200, {'items': all_items, 'total': len(all_items)}
+
+
+def api_auto_print(body):
+    """인쇄 다이얼로그가 열린 후 Enter 키로 자동 확인 (PowerShell SendKeys)"""
+    import time
+    delay_ms = int(body.get('delayMs', 2500))
+
+    def press_enter():
+        time.sleep(delay_ms / 1000.0)
+        try:
+            subprocess.run(
+                ['powershell', '-WindowStyle', 'Hidden', '-Command',
+                 '$wsh = New-Object -ComObject WScript.Shell; $wsh.SendKeys("{ENTER}")'],
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0,
+            )
+            print(f'  [자동인쇄] Enter 키 전송 완료 ({delay_ms}ms 후)')
+        except Exception as e:
+            print(f'  [자동인쇄] Enter 키 전송 실패: {e}')
+
+    threading.Thread(target=press_enter, daemon=True).start()
+    return 200, {'ok': True}
+
+
+def api_fix_launcher(_body):
+    """바탕화면 바로가기 재생성 + 서버 재시작 (VBS watchdog이 새 코드로 재시작)"""
+    import time
+
+    def do_fix():
+        # 1. 바탕화면 바로가기 재생성
+        vbs = os.path.join(BASE_DIR, 'create_shortcut.vbs')
+        if os.path.exists(vbs):
+            try:
+                subprocess.run(
+                    ['wscript.exe', vbs],
+                    capture_output=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0,
+                    timeout=10,
+                )
+                print('  [런처 수정] 바로가기 재생성 완료')
+            except Exception as e:
+                print(f'  [런처 수정] 바로가기 생성 오류: {e}')
+        time.sleep(1)
+        # 2. 서버 종료 → VBS watchdog이 새 코드로 재시작
+        print('  [런처 수정] 서버 재시작...')
+        os._exit(0)
+
+    threading.Thread(target=do_fix, daemon=True).start()
+    return 200, {'ok': True, 'message': '바로가기 수정 + 서버 재시작 중...'}
+
+
+def api_restart(_body):
+    """서버 즉시 재시작 (VBS watchdog이 새 코드로 재시작)"""
+    def do_restart():
+        import time
+        time.sleep(0.5)
+        print('  [재시작] os._exit(0) 호출')
+        os._exit(0)
+    threading.Thread(target=do_restart, daemon=True).start()
+    return 200, {'ok': True, 'message': '재시작 중...'}
+
+
 MIME = {
     '.html': 'text/html; charset=utf-8',
     '.js':   'application/javascript; charset=utf-8',
@@ -341,6 +456,69 @@ def api_cafe24(body):
                      'X-Cafe24-Api-Version': '2025-12-01'},
             method='POST'
         )
+    elif action == 'get_product_images':
+        # product_no 목록으로 이미지 조회
+        # 1차: mall.read_product API 시도
+        # 2차: 실패 시 상품 상세 페이지 HTML에서 og:image 파싱 (스코프 불필요)
+        import re as _re
+        product_nos = body.get('productNos', [])
+        if not product_nos:
+            return 200, {'images': {}}
+        result = {}
+
+        # ── 1차 시도: API (mall.read_product 스코프 있을 때) ──────────────
+        nos_str = ','.join(str(n) for n in product_nos[:50])
+        img_api_url = (
+            f'https://{mall_id}.cafe24api.com/api/v2/admin/products'
+            f'?product_no={nos_str}&fields=product_no,detail_image,list_image'
+        )
+        img_req = urllib.request.Request(
+            img_api_url,
+            headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json',
+                     'X-Cafe24-Api-Version': '2025-12-01'},
+            method='GET'
+        )
+        api_ok = False
+        try:
+            with urllib.request.urlopen(img_req, timeout=10) as r:
+                pdata = json.loads(r.read().decode())
+                for p in pdata.get('products', []):
+                    img = p.get('detail_image') or p.get('list_image') or ''
+                    if img:
+                        result[str(p['product_no'])] = img
+            api_ok = True
+            print(f'  [상품이미지] API로 {len(result)}개 조회 성공')
+        except Exception:
+            print(f'  [상품이미지] API 실패 (mall.read_product 스코프 없음) → 페이지 파싱으로 전환')
+
+        # ── 2차 시도: 상품 상세 페이지 HTML에서 og:image 추출 ────────────
+        if not api_ok:
+            for pno in product_nos[:20]:  # 최대 20개 (과도한 요청 방지)
+                if str(pno) in result:
+                    continue
+                try:
+                    page_url = f'https://{mall_id}.cafe24.com/product/detail.html?product_no={pno}'
+                    page_req = urllib.request.Request(
+                        page_url,
+                        headers={'User-Agent': 'Mozilla/5.0', 'Accept-Language': 'ko-KR,ko;q=0.9'},
+                        method='GET'
+                    )
+                    with urllib.request.urlopen(page_req, timeout=8) as r:
+                        html = r.read().decode('utf-8', errors='ignore')
+                    # og:image 메타 태그 추출
+                    m = _re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', html)
+                    if not m:
+                        m = _re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']', html)
+                    if m:
+                        img_src = m.group(1).strip()
+                        if img_src and img_src.startswith('http'):
+                            result[str(pno)] = img_src
+                            print(f'  [상품이미지] product_no={pno} og:image 파싱 성공')
+                except Exception as pe:
+                    print(f'  [상품이미지] product_no={pno} 페이지 파싱 실패: {pe}')
+
+        return 200, {'images': result}
+
     else:
         return 400, {'error': 'Unknown action'}
 
@@ -417,6 +595,31 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_json(200, load_config())
             return
 
+        if path == '/api/health':
+            cfg = load_config()
+            logen_ok  = bool(_logen_session.get('token'))
+            cafe24_ok = bool(cfg.get('cafe24', {}).get('token') or cfg.get('cafe24', {}).get('accessToken'))
+            expires_at = cfg.get('cafe24', {}).get('tokenExpiresAt', '')
+            # 만료까지 남은 분 계산
+            minutes_left = None
+            if expires_at:
+                try:
+                    exp_dt = datetime.datetime.fromisoformat(expires_at.replace('Z', '+00:00').replace('.000', ''))
+                    now_dt = datetime.datetime.now()
+                    diff = (exp_dt - now_dt).total_seconds()
+                    minutes_left = int(diff / 60)
+                except Exception:
+                    pass
+            self.send_json(200, {
+                'ok': True,
+                'logen':  {'tokenOk': logen_ok,  'tokenLen': len(_logen_session.get('token', '')),
+                           'failCount': _logen_fail_count},
+                'cafe24': {'tokenOk': cafe24_ok, 'expiresAt': expires_at,
+                           'minutesLeft': minutes_left, 'failCount': _cafe24_fail_count},
+                'time':   datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            })
+            return
+
         if path == '/':
             path = '/logen-cafe24.html'
         fpath = os.path.join(BASE_DIR, path.lstrip('/').replace('/', os.sep))
@@ -460,6 +663,67 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif path == '/api/logen-register':
             status, data = api_logen_register(body)
             self.send_json(status, data)
+        elif path == '/api/logen-printed':
+            status, data = api_logen_get_printed(body)
+            self.send_json(status, data)
+        elif path == '/api/auto-print':
+            status, data = api_auto_print(body)
+            self.send_json(status, data)
+        elif path == '/api/restart':
+            status, data = api_restart(body)
+            self.send_json(status, data)
+        elif path == '/api/fix-launcher':
+            status, data = api_fix_launcher(body)
+            self.send_json(status, data)
+        elif path == '/api/cafe24-reauth':
+            # cafe24_reauth.py --headless 실행 → 자동 OAuth 재인증
+            script = os.path.join(BASE_DIR, 'cafe24_reauth.py')
+            try:
+                print('  [카페24 재인증] cafe24_reauth.py --headless 실행 중...')
+                result = subprocess.run(
+                    [sys.executable, '-X', 'utf8', script, '--headless'],
+                    cwd=BASE_DIR, timeout=90,
+                    capture_output=True, text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0,
+                )
+                if result.returncode == 0:
+                    # 저장된 토큰 읽어서 메모리 갱신
+                    cfg = load_config()
+                    new_token = cfg.get('cafe24', {}).get('token', '')
+                    print(f'  [카페24 재인증] 성공 token={new_token[:10]}...')
+                    self.send_json(200, {'ok': True, 'token': new_token})
+                else:
+                    err = (result.stderr or result.stdout or '재인증 실패')[-500:]
+                    print(f'  [카페24 재인증] 실패: {err}')
+                    self.send_json(500, {'ok': False, 'error': err})
+            except subprocess.TimeoutExpired:
+                self.send_json(500, {'ok': False, 'error': '타임아웃 (90초)'})
+            except Exception as e:
+                self.send_json(500, {'ok': False, 'error': str(e)})
+        elif path == '/api/logen-get-token':
+            # logen_get_token.py --headless 실행하여 JWT 자동 획득 (동기 대기)
+            script = os.path.join(BASE_DIR, 'logen_get_token.py')
+            try:
+                print('  [로젠 자동 로그인 요청] logen_get_token.py --headless 실행 중...')
+                result = subprocess.run(
+                    [sys.executable, '-X', 'utf8', script, '--headless'],
+                    cwd=BASE_DIR,
+                    timeout=90,
+                    capture_output=True,
+                    text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0,
+                )
+                if result.returncode == 0 and _logen_session.get('token'):
+                    print('  [로젠 자동 로그인] 성공')
+                    self.send_json(200, {'ok': True})
+                else:
+                    err_msg = (result.stderr or result.stdout or '토큰 획득 실패')[-300:]
+                    print(f'  [로젠 자동 로그인] 실패: {err_msg}')
+                    self.send_json(500, {'ok': False, 'error': err_msg})
+            except subprocess.TimeoutExpired:
+                self.send_json(500, {'ok': False, 'error': '타임아웃 (90초)'})
+            except Exception as e:
+                self.send_json(500, {'ok': False, 'error': str(e)})
         elif path == '/store-logen-token':
             # 브라우저에서 로젠 JWT 토큰 수신
             _logen_session['token']     = body.get('token', '')
@@ -480,21 +744,96 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_json(404, {'error': 'Not Found'})
 
 
-REFRESH_INTERVAL = 6 * 3600  # 6시간마다 JWT 갱신
+REFRESH_INTERVAL      = 3 * 3600   # 3시간마다 로젠 JWT 갱신 (기존 6h → 안전하게 단축)
+CAFE24_REFRESH_INTERVAL = 80 * 60  # 80분마다 카페24 토큰 갱신 (유효기간 2시간, 여유 있게)
+_cafe24_fail_count = 0             # 연속 실패 횟수 (짧은 retry 제어용)
+_logen_fail_count  = 0
 
-def auto_refresh_logen_token():
-    """6시간마다 logen_get_token.py --headless 실행하여 JWT 자동 갱신"""
-    script = os.path.join(BASE_DIR, 'logen_get_token.py')
+def auto_refresh_cafe24_token(retry=False):
+    """80분마다 카페24 access_token 자동 갱신 + 실패 시 15분 후 재시도(최대 3회)"""
+    global _cafe24_fail_count
     try:
-        print('  [JWT 자동 갱신 시작]')
-        subprocess.Popen(
+        cfg = load_config()
+        mall_id     = cfg.get('cafe24', {}).get('mallId', '')
+        client_id   = cfg.get('cafe24', {}).get('clientId', '')
+        client_sec  = cfg.get('cafe24', {}).get('clientSecret', '')
+        refresh_tok = cfg.get('cafe24', {}).get('refreshToken', '')
+        if mall_id and client_id and client_sec and refresh_tok:
+            cred    = base64.b64encode(f'{client_id}:{client_sec}'.encode()).decode()
+            payload = f'grant_type=refresh_token&refresh_token={urllib.parse.quote(refresh_tok)}'.encode()
+            req     = urllib.request.Request(
+                f'https://{mall_id}.cafe24api.com/api/v2/oauth/token',
+                data=payload,
+                headers={'Authorization': f'Basic {cred}', 'Content-Type': 'application/x-www-form-urlencoded'},
+                method='POST'
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read().decode())
+            if data.get('access_token'):
+                cfg['cafe24']['accessToken']  = data['access_token']
+                cfg['cafe24']['token']         = data['access_token']
+                if data.get('refresh_token'):
+                    cfg['cafe24']['refreshToken'] = data['refresh_token']
+                if data.get('expires_at'):
+                    cfg['cafe24']['tokenExpiresAt'] = data['expires_at']
+                else:
+                    expires_dt = datetime.datetime.now() + datetime.timedelta(hours=2)
+                    cfg['cafe24']['tokenExpiresAt'] = expires_dt.strftime('%Y-%m-%dT%H:%M:%S.000')
+                save_config(cfg)
+                _cafe24_fail_count = 0
+                print(f'  [카페24 토큰 자동갱신 완료] {datetime.datetime.now().strftime("%H:%M:%S")}')
+            else:
+                raise ValueError(f'access_token 없음: {data}')
+        else:
+            print(f'  [카페24 토큰 갱신 스킵] 설정 없음')
+            _cafe24_fail_count = 0
+    except Exception as e:
+        _cafe24_fail_count += 1
+        print(f'  [카페24 토큰 갱신 오류 #{_cafe24_fail_count}] {e}')
+        if _cafe24_fail_count <= 3:
+            # 실패 시 15분 후 재시도
+            print(f'  [카페24] 15분 후 재시도 예약...')
+            threading.Timer(15 * 60, auto_refresh_cafe24_token, kwargs={'retry': True}).start()
+            return  # 재시도 예약했으니 정상 주기 타이머는 이번엔 건너뜀
+        else:
+            print(f'  [카페24] 3회 연속 실패 → 다음 정상 주기에 재시도')
+            _cafe24_fail_count = 0
+    # 다음 정상 주기 갱신 예약
+    threading.Timer(CAFE24_REFRESH_INTERVAL, auto_refresh_cafe24_token).start()
+
+def auto_refresh_logen_token(retry=False):
+    """3시간마다 logen_get_token.py --headless 실행하여 JWT 자동 갱신 + 실패 시 30분 후 재시도"""
+    global _logen_fail_count
+    script = os.path.join(BASE_DIR, 'logen_get_token.py')
+    prev_token = _logen_session.get('token', '')
+    try:
+        print(f'  [로젠 JWT 자동 갱신 시작] {"(재시도)" if retry else ""}')
+        result = subprocess.run(
             [sys.executable, '-X', 'utf8', script, '--headless'],
             cwd=BASE_DIR,
+            capture_output=True,
+            timeout=120,  # 2분 제한
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
         )
+        # 갱신 성공 여부: 메모리 토큰이 바뀌었거나 returncode=0
+        new_token = _logen_session.get('token', '')
+        if result.returncode == 0 and new_token:
+            _logen_fail_count = 0
+            changed = '변경됨' if new_token != prev_token else '동일 (세션 유지)'
+            print(f'  [로젠 JWT 갱신 완료] {datetime.datetime.now().strftime("%H:%M:%S")} 토큰={changed}')
+        else:
+            raise RuntimeError(f'returncode={result.returncode}, token_len={len(new_token)}')
     except Exception as e:
-        print(f'  [JWT 갱신 오류] {e}')
-    # 다음 갱신 예약
+        _logen_fail_count += 1
+        print(f'  [로젠 JWT 갱신 오류 #{_logen_fail_count}] {e}')
+        if _logen_fail_count <= 3:
+            print(f'  [로젠] 30분 후 재시도 예약...')
+            threading.Timer(30 * 60, auto_refresh_logen_token, kwargs={'retry': True}).start()
+            return
+        else:
+            print(f'  [로젠] 3회 연속 실패 → 다음 정상 주기에 재시도')
+            _logen_fail_count = 0
+    # 다음 정상 주기 갱신 예약
     threading.Timer(REFRESH_INTERVAL, auto_refresh_logen_token).start()
 
 if __name__ == '__main__':
@@ -509,11 +848,25 @@ if __name__ == '__main__':
     # 2. 서버 시작 후 10초 뒤 첫 JWT 갱신 (백그라운드)
     threading.Timer(10, auto_refresh_logen_token).start()
 
-    server = ThreadingHTTPServer(('localhost', PORT), Handler)
+    # 3. 카페24 토큰 자동 갱신 (30초 후 첫 갱신, 이후 90분마다)
+    threading.Timer(30, auto_refresh_cafe24_token).start()
+
+    # 포트 사용 중이면 최대 10초 재시도
+    for _retry in range(10):
+        try:
+            server = ThreadingHTTPServer(('localhost', PORT), Handler)
+            break
+        except OSError as e:
+            print(f'  [포트 {PORT} 사용중] 재시도 {_retry+1}/10... ({e})', flush=True)
+            import time as _time; _time.sleep(1)
+    else:
+        print(f'  [FATAL] 포트 {PORT} 바인딩 실패 - 다른 프로세스가 점유 중', flush=True)
+        sys.exit(1)
     print(f'')
     print(f'  [OK] Logen x Cafe24 server started!')
     print(f'  Open: http://localhost:{PORT}/')
     print(f'  JWT 자동 갱신: 6시간마다 (백그라운드)')
+    print(f'  카페24 토큰 자동 갱신: 90분마다 (백그라운드)')
     print(f'  (종료: Ctrl+C)')
     print(f'')
     try:

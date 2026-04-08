@@ -1,7 +1,7 @@
 # CLAUDE.md — 로젠 x 카페24 송장 매니저 (새 채팅 인수인계용)
 
 > 이 파일은 새 채팅창에서 작업을 이어갈 때 Claude가 가장 먼저 읽어야 하는 파일입니다.
-> 마지막 업데이트: 2026-03-31
+> 마지막 업데이트: 2026-04-08
 
 ---
 
@@ -223,7 +223,7 @@ run_server.py의 `SENDER_DEFAULTS`:
 - [x] 로젠택배 운송장 자동 등록 (전화번호, 주소, 상세주소, 배송메시지 모두 정상)
 - [x] JWT 자동 획득 (Playwright persistent session)
 - [x] JWT 메모리 + 디스크 영속화 (서버 재시작 후 자동 복원)
-- [x] 6시간마다 JWT 자동 갱신 (백그라운드 threading.Timer)
+- [x] 3시간마다 JWT 자동 갱신 + 실패 시 30분 retry×3 (백그라운드 threading.Timer)
 - [x] 설정 영구 저장 (lc_config.json, 브라우저 무관)
 - [x] 바탕화면 바로가기 + 로젠 로고 아이콘
 - [x] 배송 조회 기능 (tracker.delivery API)

@@ -82,8 +82,8 @@ def api_logen_register(body):
     snd_addr_repl = body.get('senderAddrRepl', '(장상동 302)')
     cust_cd  = body.get('customerCode', '33253401')
     pick_bran_cd  = body.get('pickBranCd',  '332')
-    pick_sales_cd = body.get('pickSalesCd', '33212059')
-    pick_sales_nm = body.get('pickSalesNm', '본오동3')
+    pick_sales_cd = body.get('pickSalesCd', '33212068')
+    pick_sales_nm = body.get('pickSalesNm', '상록영업소')
 
     BASE = 'https://logis.ilogen.com/api/lrm01b-reserve'
 
@@ -258,7 +258,7 @@ def api_logen_get_printed(body):
     token    = _logen_session['token']
     page_id  = _logen_session.get('page_id', 'lrm01f0050')
     cust_cd  = body.get('customerCode', '33253401')
-    pick_sales_cd = body.get('pickSalesCd', '33212059')
+    pick_sales_cd = body.get('pickSalesCd', '33212068')
     pick_bran_cd  = body.get('pickBranCd',  '332')
 
     today_str = datetime.date.today().strftime('%Y-%m-%d')
@@ -526,7 +526,12 @@ def api_cafe24(body):
         with urllib.request.urlopen(req, timeout=15) as resp:
             return resp.status, json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
-        return e.code, json.loads(e.read().decode())
+        err_body = e.read().decode('utf-8', errors='ignore')
+        print(f'  [카페24 API 오류] {action} HTTP {e.code}: {err_body[:300]}')
+        try:
+            return e.code, json.loads(err_body)
+        except Exception:
+            return e.code, {'error': {'code': e.code, 'message': err_body[:300]}}
 
 def api_logen(body):
     tracking_numbers = body.get('trackingNumbers', [])

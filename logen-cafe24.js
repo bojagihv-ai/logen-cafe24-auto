@@ -1084,7 +1084,11 @@ function renderUploadTable() {
       <td>${esc(item.receiverName)}</td>
       <td title="${esc(item.productName)}">${esc(item.productName)}</td>
       <td>${esc(item.trackingNo)}</td>
-      <td><span class="status-tag ${item.status}">${statusLabel(item.status)}</span></td>
+      <td>
+        <span class="status-tag ${item.status}" ${item._error ? `title="${esc(item._error)}"` : ''}>${statusLabel(item.status)}</span>
+        ${item._note  ? `<div style="font-size:11px;color:#27ae60;margin-top:2px;">${esc(item._note)}</div>` : ''}
+        ${item._error ? `<div style="font-size:11px;color:#e74c3c;margin-top:2px;max-width:220px;word-break:break-all;">${esc(item._error)}</div>` : ''}
+      </td>
     </tr>
   `).join('');
 
@@ -1148,12 +1152,21 @@ async function uploadToCafe24() {
     dom.uploadProgressText.textContent = `${i + 1}/${selectedItems.length}`;
 
     try {
-      await cafe24UpdateShipping(item.orderId, item.orderItemCode, item.trackingNo);
-      item.status = 'registered';
+      const result = await cafe24UpdateShipping(item.orderId, item.orderItemCode, item.trackingNo);
+      if (result && result.__alreadyRegistered) {
+        item.status = 'registered';
+        item._error = '';
+        item._note = '이미 송장등록이 완료된 상태입니다';
+      } else {
+        item.status = 'registered';
+        item._error = '';
+        item._note = '';
+      }
       success++;
     } catch (err) {
       console.error(`송장 등록 실패 [${item.orderId}]:`, err);
       item.status = 'failed';
+      item._error = err.message || String(err);
       fail++;
     }
 
@@ -1196,21 +1209,48 @@ async function cafe24UpdateShipping(orderId, orderItemCode, trackingNo) {
 
   const data = await resp.json().catch(() => ({}));
 
-  // API 응답 내 에러 확인 (200이라도 에러가 있을 수 있음)
-  if (data.error) {
-    const code = data.error.code;
-    const msg = data.error.message || '';
+  // API 응답 내 에러 확인
+  if (data.error || !resp.ok) {
+    const code = (data.error || {}).code;
+    const msg  = (data.error || {}).message || '';
+
     if (msg.includes('insufficient_scope')) {
       throw new Error('권한 부족: 카페24 앱에 "주문 쓰기(mall.write_order)" 권한을 추가하고 다시 인증하세요.');
     }
     if (code === 404) {
-      throw new Error(`API를 찾을 수 없습니다 (404). 주문번호를 확인하세요: ${orderId}`);
+      throw new Error(`주문번호를 찾을 수 없습니다 (${orderId})`);
     }
-    throw new Error(msg || `API 에러 (코드: ${code})`);
-  }
 
-  if (!resp.ok) {
-    throw new Error(`HTTP ${resp.status}`);
+    // 에러가 나도 실제로는 이미 등록됐을 수 있음 → 주문 상태 재확인
+    try {
+      const checkResp = await fetch(API_PROXY, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'get_order_detail',
+          mallId: appState.cafe24.mallId,
+          token: appState.cafe24.token,
+          orderId,
+        }),
+      });
+      const checkData = await checkResp.json().catch(() => ({}));
+      const order = checkData.order || {};
+      // 카페24 order 객체: shipping_status, items[].tracking_no 등
+      const shippingStatus = order.shipping_status || '';
+      const items = order.items || [];
+      const existingTracking = items.map(it => it.tracking_no).filter(Boolean).join(',');
+
+      // 배송대기(standby) 이상이거나, 이미 같은 송장번호 등록됨
+      const alreadyDone = ['standby','delivering','delivered','shipping'].includes(shippingStatus)
+        || existingTracking.includes(trackingNo);
+
+      if (alreadyDone) {
+        // 성공으로 처리 (특수 플래그)
+        return { __alreadyRegistered: true, shippingStatus, existingTracking };
+      }
+    } catch(_) { /* 재확인 실패 시 원래 에러 throw */ }
+
+    throw new Error(msg || `HTTP ${resp.status}`);
   }
 
   return data;
@@ -1614,7 +1654,7 @@ async function loadLogenPrinted() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           customerCode: appState.logen.customerCode,
-          pickSalesCd: '33212059', pickBranCd: '332',
+          pickSalesCd: '33212068', pickBranCd: '332',
           startDate: dateFrom, endDate: dateTo,
         }),
       });
@@ -1746,7 +1786,7 @@ async function loadLogenPrintedToUpload() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         customerCode: appState.logen.customerCode || '33253401',
-        pickSalesCd: '33212059', pickBranCd: '332',
+        pickSalesCd: '33212068', pickBranCd: '332',
         startDate: dateFrom, endDate: dateTo,
       }),
     });
@@ -1760,7 +1800,7 @@ async function loadLogenPrintedToUpload() {
       resp = await fetch('/api/logen-printed', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ customerCode: appState.logen.customerCode || '33253401', pickSalesCd: '33212059', pickBranCd: '332', startDate: dateFrom, endDate: dateTo }),
+        body: JSON.stringify({ customerCode: appState.logen.customerCode || '33253401', pickSalesCd: '33212068', pickBranCd: '332', startDate: dateFrom, endDate: dateTo }),
       });
     }
 

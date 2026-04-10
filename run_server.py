@@ -841,6 +841,51 @@ def auto_refresh_logen_token(retry=False):
     # 다음 정상 주기 갱신 예약
     threading.Timer(REFRESH_INTERVAL, auto_refresh_logen_token).start()
 
+
+# ============================================================
+# 서버 백그라운드 자동인쇄
+# ============================================================
+CHROME_PATHS = [
+    r'C:\Program Files\Google\Chrome\Application\chrome.exe',
+    r'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe',
+    r'C:\Users\kua\AppData\Local\Google\Chrome\Application\chrome.exe',
+]
+
+def server_autoprint_check():
+    """매분 자동인쇄 시각 체크 → Chrome --kiosk-printing으로 자동 실행"""
+    try:
+        cfg = load_config()
+        ap = cfg.get('autoprint', {})
+        if ap.get('enabled'):
+            now = datetime.datetime.now()
+            target = ap.get('time', '15:00')
+            now_hm = f'{now.hour:02d}:{now.minute:02d}'
+            today  = now.strftime('%Y-%m-%d')
+
+            if now_hm == target and cfg.get('autoprint_server_last_run') != today:
+                print(f'  [서버 자동인쇄] 예약 시각 도달: {target}')
+                # 중복 실행 방지 - 먼저 기록
+                cfg['autoprint_server_last_run'] = today
+                save_config(cfg)
+
+                # Chrome 찾기
+                chrome = next((p for p in CHROME_PATHS if os.path.exists(p)), None)
+                url = f'http://localhost:{PORT}/logen-cafe24.html?autoprint=1'
+
+                if chrome:
+                    subprocess.Popen([chrome, '--kiosk-printing', '--new-window', url],
+                                     creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+                    print(f'  [서버 자동인쇄] Chrome kiosk-printing 실행: {url}')
+                else:
+                    # Chrome 없으면 기본 브라우저로 열고 Enter 전략
+                    subprocess.Popen(['start', '', url], shell=True)
+                    print(f'  [서버 자동인쇄] 기본 브라우저 실행: {url}')
+    except Exception as e:
+        print(f'  [서버 자동인쇄 오류] {e}')
+    finally:
+        threading.Timer(60, server_autoprint_check).start()
+
+
 if __name__ == '__main__':
     # 1. 서버 재시작 시 디스크에서 JWT 복원
     _saved = load_config()
@@ -855,6 +900,9 @@ if __name__ == '__main__':
 
     # 3. 카페24 토큰 자동 갱신 (30초 후 첫 갱신, 이후 90분마다)
     threading.Timer(30, auto_refresh_cafe24_token).start()
+
+    # 4. 자동인쇄 백그라운드 체커 (60초마다 시각 체크)
+    threading.Timer(60, server_autoprint_check).start()
 
     # 포트 사용 중이면 최대 10초 재시도
     for _retry in range(10):

@@ -150,6 +150,19 @@ async function init() {
   setDefaultDates();
   updateStatusIndicators();
   restoreSessionData();
+
+  // 서버 백그라운드 자동인쇄 트리거 감지 (?autoprint=1)
+  if (new URLSearchParams(window.location.search).get('autoprint') === '1') {
+    console.log('[서버 자동인쇄] ?autoprint=1 감지 - 5초 후 자동 실행');
+    document.title = '🖨️ 자동인쇄 실행 중...';
+    setTimeout(async () => {
+      await executeAutoPrint(false);
+      // 인쇄 완료 후 탭 자동 닫기 (kiosk-printing 모드)
+      setTimeout(() => {
+        try { window.close(); } catch(_) {}
+      }, 3000);
+    }, 5000);
+  }
 }
 
 async function loadConfigFromServer() {
